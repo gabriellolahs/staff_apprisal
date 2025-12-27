@@ -1,0 +1,405 @@
+<?php
+session_start();
+include "db.php";
+
+// ✅ Check if staff is logged in
+if (!isset($_SESSION['staff'])) {
+    header("Location: login.php");
+    exit();
+}
+
+$staff_id = $_SESSION['staff']; // ✅ The ID of the logged-in staff
+
+// 🔹 Fetch staff info from staff table
+$stmt = $conn->prepare("SELECT * FROM staff WHERE staff_id = ?");
+$stmt->bind_param("s", $staff_id);
+$stmt->execute();
+$staff_result = $stmt->get_result();
+
+if ($staff_result->num_rows === 1) {
+    $staff = $staff_result->fetch_assoc();
+} else {
+    // ❌ If somehow not found, logout to avoid mixing data
+    session_destroy();
+    header("Location: login.php");
+    exit();
+}
+
+// 🔹 Default values
+$is_locked = 0;
+$readonly = '';
+$disabled = '';
+
+// 🔹 Set passport safely
+$passport = "uploads/default.png";
+if (!empty($staff['passport']) && file_exists($staff['passport'])) {
+    $passport = $staff['passport'];
+} elseif (!empty($staff['passport']) && file_exists("uploads/" . $staff['passport'])) {
+    $passport = "uploads/" . $staff['passport'];
+}
+
+// 🔹 Fetch biodata (with proper joins)
+$sql = "
+SELECT sb.*, s.school_name, d.department_name
+FROM staff_biodata sb
+LEFT JOIN schools s ON sb.school = s.id
+LEFT JOIN departments d ON sb.department = d.id
+WHERE sb.staff_id = ?
+";
+$stmt = $conn->prepare($sql);
+$stmt->bind_param("s", $staff_id);
+$stmt->execute();
+$result = $stmt->get_result();
+
+if ($result->num_rows > 0) {
+    $biodata = $result->fetch_assoc();
+    $is_locked = isset($biodata['is_locked']) ? $biodata['is_locked'] : 0;
+} else {
+    $biodata = [];
+}
+
+// 🔹 Lock form if biodata is already locked
+if ($is_locked) {
+    $readonly = 'readonly';
+    $disabled = 'disabled';
+}
+?>
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Staff Biodata Form</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background-image: url('20250919_095448.jpg');
+            background-repeat: no-repeat;
+            background-size: cover;
+            background-attachment: fixed;
+        }
+        .form-container {
+            max-width: 1100px;
+            margin: 30px auto;
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        .header-box {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 5px;
+        }
+        .header-box img {
+            width: 120px;
+            height: 120px;
+            border-radius: 6px;
+            object-fit: cover;
+        }
+        .section-title {
+            background: #e9ecef;
+            padding: 10px;
+            border-radius: 6px;
+            margin-top: 25px;
+        }
+        .sidebar {
+            width: 240px;
+            height: 100vh;
+            background: #2c3e50;
+            color: #fff;
+            position: fixed;
+            top: 0;
+            left: 0;
+            padding: 20px;
+        }
+        .sidebar h2 { text-align: center; color: #f1c40f; margin-bottom: 30px; }
+        .sidebar a {
+            display: block;
+            color: #ecf0f1;
+            padding: 10px;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 5px 0;
+        }
+        .sidebar a:hover { background: #34495e; }
+        .main { margin-left: 240px; padding: 30px; }
+    </style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<div class="sidebar">
+    <div class="text-center mb-3">
+        <img src="20250406_220923_transcpr-removebg-preview.png" alt="System Logo" width="150">
+    </div>
+    <h2>Teaching Menu</h2>
+    <a href="academic_dashboard.php">🏠 Dashboard</a>
+    <a href="biodata.php">👤 Profile</a>
+    <a href="staff_appraisal.php">📝 Appraisal</a>
+    <a href="academic_reports.php">📊 Reports</a>
+    <a href="set_password.php">🔑 Set Password</a>
+    <a href="logout.php" style="color:#e74c3c;">🚪 Logout</a>
+</div>
+
+<div class="main">
+    <div class="header-box">
+        <div class="text-center">
+            <h3>THE FEDERAL POLYTECHNIC, ILE-OLUJI</h3>
+            <h5>(Office of the Registrar)</h5>
+            <h4>STAFF BIODATA FORM</h4>
+        </div>
+        <img src="<?php echo htmlspecialchars($passport); ?>" alt="Passport">
+    </div>
+
+    <form method="post" action="save_biodata.php" class="form-container">
+        <h6><i>Please fill in your information correctly</i></h6>
+        <?php if ($is_locked): ?>
+            <div class="alert alert-info text-center mt-4">
+                Your biodata has been locked. Contact admin to make changes.
+            </div>
+        <?php endif; ?>
+
+        <!-- Staff Information -->
+        <div class="section-title">Staff Information</div>
+        <div class="row mb-3">
+            <div class="col-md-3">
+                <label>Staff ID</label>
+                <input type="text" class="form-control" name="staff_id"
+                    value="<?php echo htmlspecialchars($staff['staff_id']); ?>" readonly>
+            </div>
+            <div class="col-md-3">
+                <label>Category</label>
+                <input type="text" class="form-control" name="category"
+                    value="<?php echo htmlspecialchars($staff['category']); ?>" readonly>
+            </div>
+            <div class="col-md-3">
+                <label>School</label>
+                <select class="form-control" name="school" <?php echo $disabled; ?>>
+                    <option value="">-- Select School --</option>
+                    <?php foreach ($schools as $school): ?>
+                        <option value="<?php echo $school['id']; ?>"
+                            <?php echo ($selectedSchoolId == $school['id']) ? 'selected' : ''; ?>>
+                            <?php echo htmlspecialchars($school['school_name']); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label>Department</label>
+                <select class="form-control" name="department" <?php echo $disabled; ?>>
+                    <option value="">-- Select Department --</option>
+                    <?php foreach ($departments as $dept): ?>
+                        <option value="<?php echo $dept['id']; ?>"
+                            <?php echo ($selectedDeptId == $dept['id']) ? 'selected' : ''; ?>>
+                            <?php echo htmlspecialchars($dept['department_name']); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+                    
+      <div class="col-md-3">
+        <label>Designation/Present Post</label><input type="text" class="form-control" name="designation" value="<?php echo htmlspecialchars($biodata['designation'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+    </div>
+
+    <!-- Personal Info -->
+    <div class="section-title">Personal Information</div>
+    <div class="row mb-3">
+      <div class="col-md-3"><label>Title</label><input type="text" class="form-control" name="title" value="<?php echo htmlspecialchars($biodata['title'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-3"><label>Surname</label><input type="text" class="form-control" name="surname" value="<?php echo $staff['surname']; ?>" <?php echo $readonly; ?>></div>
+      <div class="col-md-3"><label>First Name</label><input type="text" class="form-control" name="firstname" value="<?php echo $staff['firstname']; ?>" <?php echo $readonly; ?>></div>
+      <div class="col-md-3"><label>Middle Name</label><input type="text" class="form-control" name="lastname" value="<?php echo $staff['lastname']; ?>" <?php echo $readonly; ?>></div>
+    </div>
+
+<div class="row mb-3">
+      <div class="col-md-3"><label>Marital Status</label><input type="text" class="form-control" name="marital_status"value="<?php echo htmlspecialchars($biodata['marital_status'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-3"><label>Sex</label><input type="text" class="form-control" name="sex" value="<?php echo $staff['gender']; ?>"<?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-3"><label>Date of Birth</label><input type="date" class="form-control" name="dob" value="<?php echo htmlspecialchars($biodata['dob'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-3"><label>Place of Birth</label><input type="text" class="form-control" name="pob" value="<?php echo htmlspecialchars($biodata['pob'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+
+    <div class="row mb-3">
+      <div class="col-md-3"><label>Nationality</label><input type="text" class="form-control" name="nationality" value="<?php echo htmlspecialchars($biodata['nationality'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-3"><label>State of Origin</label><input type="text" class="form-control" name="state" value="<?php echo htmlspecialchars($biodata['state'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-3"><label>Senatorial District</label><input type="text" class="form-control" name="district" value="<?php echo htmlspecialchars($biodata['district'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-3"><label>LGA of Origin</label><input type="text" class="form-control" name="lga"value="<?php echo htmlspecialchars($biodata['lga'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+    </div>
+
+    <div class="row mb-3">
+      <div class="col-md-3"><label>Town of Origin</label><input type="text" class="form-control" name="town" value="<?php echo htmlspecialchars($biodata['town'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-3"><label>Ward</label><input type="text" class="form-control" name="ward" value="<?php echo htmlspecialchars($biodata['ward'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-3"><label>Religion</label><input type="text" class="form-control" name="religion" value="<?php echo htmlspecialchars($biodata['religion'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-3"><label>Hobbies</label><input type="text" class="form-control" name="hobbies" value="<?php echo htmlspecialchars($biodata['hobbies'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+    </div>
+
+    <!-- Contact Info -->
+    <div class="section-title">Contact Information</div>
+    <div class="row mb-3">
+      <div class="col-md-4"><label>Permanent Address</label><input type="text" class="form-control" name="perm_address" value="<?php echo htmlspecialchars($biodata['perm_address'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-4"><label>Contact Address</label><input type="text" class="form-control" name="contact_address" value="<?php echo htmlspecialchars($biodata['contact_address'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-4"><label>Residential Address</label><input type="text" class="form-control" name="res_address" value="<?php echo htmlspecialchars($biodata['res_address'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+    </div>
+    <div class="row mb-3">
+      <div class="col-md-3"><label>Phone</label><input type="text" class="form-control" name="phone" value="<?php echo htmlspecialchars($biodata['phone'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-3"><label>GSM</label><input type="text" class="form-control" name="gsm" value="<?php echo htmlspecialchars($biodata['gsm'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-3"><label>Email</label><input type="email" class="form-control" name="email" value="<?php echo htmlspecialchars($biodata['email'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-3"><label>Blood Group</label><input type="text" class="form-control" name="blood_group" value="<?php echo htmlspecialchars($biodata['blood_group'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+    </div>
+    <div class="row mb-3">
+      <div class="col-md-3"><label>Genotype</label><input type="text" class="form-control" name="genotype" value="<?php echo htmlspecialchars($biodata['genotype'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-3"><label>Spouse Name</label><input type="text" class="form-control" name="spouse_name" value="<?php echo htmlspecialchars($biodata['spouse_name'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-3"><label>No. of Children</label><input type="number" class="form-control" name="children" value="<?php echo htmlspecialchars($biodata['children'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+    </div>
+
+    <!-- Next of Kin -->
+    <div class="section-title">Next of Kin</div>
+    <div class="row mb-3">
+      <div class="col-md-4"><label>Name</label><input type="text" class="form-control" name="nok_name" value="<?php echo htmlspecialchars($biodata['nok_name'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-4"><label>Relationship</label><input type="text" class="form-control" name="nok_relation" value="<?php echo htmlspecialchars($biodata['nok_relation'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-4"><label>Phone</label><input type="text" class="form-control" name="nok_phone" value="<?php echo htmlspecialchars($biodata['nok_phone'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+    </div>
+    <div class="mb-3"><label>Address</label><input type="text" class="form-control" name="nok_address" value="<?php echo htmlspecialchars($biodata['nok_address'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+
+    <!-- Official Info -->
+    <div class="section-title">Official Information</div>
+    <div class="row mb-3">
+      <div class="col-md-4"><label>Place of First Appt (before FPI)</label><input type="text" class="form-control" name="first_place_before" value="<?php echo htmlspecialchars($biodata['first_place_before'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-4"><label>Date of First Appt (before FPI)</label><input type="date" class="form-control" name="first_date_before" value="<?php echo htmlspecialchars($biodata['first_date_before'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-4"><label>Place of First Appt (in FPI)</label><input type="text" class="form-control" name="first_place_fpi" value="<?php echo htmlspecialchars($biodata['first_place_fpi'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+    </div>
+    <div class="row mb-3">
+      <div class="col-md-4"><label>Type of Appointment</label><input type="text" class="form-control" name="appt_type" value="<?php echo htmlspecialchars($biodata['appt_type'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-4"><label>Post On Appt (in FPI)</label><input type="text" class="form-control" name="post_appt" value="<?php echo htmlspecialchars($biodata['post_appt'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-4"><label>Office Held</label><input type="text" class="form-control" name="office_held" value="<?php echo htmlspecialchars($biodata['office_held'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+    </div>
+    <div class="row mb-3">
+      <div class="col-md-3"><label>Date of Present Appt</label><input type="date" class="form-control" name="present_appt" value="<?php echo htmlspecialchars($biodata['present_appt'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-3"><label>Date of Regularization</label><input type="date" class="form-control" name="regularization" value="<?php echo htmlspecialchars($biodata['regularization'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-3"><label>GL</label><input type="text" class="form-control" name="gl" value="<?php echo htmlspecialchars($biodata['gl'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-3"><label>Step</label><input type="text" class="form-control" name="step" value="<?php echo htmlspecialchars($biodata['step'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+    </div>
+    <div class="row mb-3">
+      <div class="col-md-3"><label>Date of Confirmation</label><input type="date" class="form-control" name="confirmation" value="<?php echo htmlspecialchars($biodata['confirmation'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-3"><label>Date of First Appt (in Public Service)</label><input type="date" class="form-control" name="first_appt_pub" value="<?php echo htmlspecialchars($biodata['first_appt_pub'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+      <div class="col-md-3"><label>Accommodation</label><input type="text" class="form-control" name="accommodation" value="<?php echo htmlspecialchars($biodata['accommodation'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+    </div>
+
+    <!-- Extra Info -->
+    <div class="section-title">Additional Information</div>
+<div class="row mb-3">
+  <div class="col-md-4">
+    <label>Qualifications</label>
+    <input type="text" class="form-control" name="qualifications" value="<?php echo htmlspecialchars($biodata['qualifications'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+  <div class="col-md-4">
+    <label>Union Name</label>
+    <input type="text" class="form-control" name="union_name" value="<?php echo htmlspecialchars($biodata['union_name'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+  <div class="col-md-4">
+    <label>Specialization</label>
+    <input type="text" class="form-control" name="specialization" value="<?php echo htmlspecialchars($biodata['specialization'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+</div>
+<div class="row mb-3">
+  <div class="col-md-6">
+    <label>Pension Fund Administrator</label>
+    <input type="text" class="form-control" name="pfa" value="<?php echo htmlspecialchars($biodata['pfa'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+  <div class="col-md-6">
+    <label>Pin Code</label>
+    <input type="text" class="form-control" name="pin_code" value="<?php echo htmlspecialchars($biodata['pin_code'] ?? ''); ?>"
+                           <?php echo $is_locked ?> <?php echo $readonly; ?> required></div>
+</div> 
+  </div>
+
+     <?php if (!$is_locked): ?>
+                <div class="text-center">
+                    <button type="submit" class="btn btn-primary px-4"><?php echo $disabled; ?>SAVE</button>
+                </div>
+            <?php else: ?>
+                <div class="alert alert-info text-center mt-3">
+                    Your biodata is locked. Please contact the administrator for any update.
+                </div>
+            <?php endif; ?>
+  </form>
+</div>
+ </div>
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script>
+  // Load departments dynamically
+  $("#school").change(function(){
+    var school_id = $(this).val();
+    $.ajax({
+      url: "get_departments.php",
+      type: "POST",
+      data: { school_id: school_id },
+      success: function(data){
+        $("#department").html(data);
+      }
+    });
+  });
+
+  // Auto-load staff’s current department
+  $(document).ready(function(){
+    var school_id = $("#school").val();
+    var current_dept = "<?php echo $staff['department_id'] ?? ''; ?>";
+    if(school_id){
+      $.ajax({
+        url: "get_departments.php",
+        type: "POST",
+        data: { school_id: school_id },
+        success: function(data){
+          $("#department").html(data);
+          if(current_dept){
+            $("#department").val(current_dept);
+          }
+        }
+      });
+    }
+  });
+</script>
+</body>
+</html>
